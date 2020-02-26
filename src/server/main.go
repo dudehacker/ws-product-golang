@@ -15,22 +15,53 @@ type counters struct {
 	click int
 }
 
-var (
-	c = counters{}
+func (c *counters) incView() {
+	c.Lock()
+	defer c.Unlock()
+	c.view++
+}
 
-	content = []string{"sports", "entertainment", "business", "education"}
+func (c *counters) incClick() {
+	c.Lock()
+	defer c.Unlock()
+	c.click++
+}
+
+var (
+	c         = counters{}
+	statsMax  = 10
+	dataStore = make(map[string]*counters)
+	content   = []string{"sports", "entertainment", "business", "education"}
 )
 
 func welcomeHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Welcome to EQ Works 😎")
 }
 
-func viewHandler(w http.ResponseWriter, r *http.Request) {
+func getKey() string {
 	data := content[rand.Intn(len(content))]
+	dt := time.Now()
+	formatedTime := dt.Format("01-02-2006 15:04:05")
+	key := data + ":" + formatedTime
+	return key
+}
 
-	c.Lock()
-	c.view++
-	c.Unlock()
+func getCounter() *counters {
+	key := getKey()
+	counter := dataStore[key]
+	if counter == nil {
+		counter = &counters{}
+		dataStore[key] = counter
+	}
+	log.Println(key)
+	log.Println(counter)
+	return counter
+}
+
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	counter := getCounter()
+	counter.incView()
+	fmt.Println(counter)
 
 	err := processRequest(r)
 	if err != nil {
@@ -41,7 +72,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 
 	// simulate random click call
 	if rand.Intn(100) < 50 {
-		processClick(data)
+		counter.incClick()
 	}
 }
 
@@ -50,33 +81,34 @@ func processRequest(r *http.Request) error {
 	return nil
 }
 
-func processClick(data string) error {
-	c.Lock()
-	c.click++
-	c.Unlock()
-
-	return nil
-}
-
 func statsHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAllowed() {
 		w.WriteHeader(429)
 		return
 	}
+	c.Lock()
+	c.view++
+	c.Unlock()
 }
 
 func isAllowed() bool {
-	return true
+	return c.view <= statsMax
 }
 
-func uploadCounters() error {
-	return nil
+func uploadCounters(dt int64) error {
+	for {
+		counter := getCounter()
+		counter.incView()
+		counter.incClick()
+		log.Println(counter)
+		time.Sleep(time.Duration(dt) * time.Millisecond)
+	}
 }
 
 func main() {
 	http.HandleFunc("/", welcomeHandler)
 	http.HandleFunc("/view/", viewHandler)
 	http.HandleFunc("/stats/", statsHandler)
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	go uploadCounters(5000)
+	log.Fatal(http.ListenAndServe(":3000", nil))
 }
